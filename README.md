@@ -2,6 +2,8 @@
 
 GamifyConnect is a real-time engagement analytics dashboard designed to simulate user behavior on a social media platform. Built using Python, Streamlit, and Google Cloud Firestore, it tracks activities like posts, comments, likes, and shares, then awards points and badges to users using gamification logic.
 
+While this model currently simulates 5 users for clarity, it is fully scalable. The Firestore database and analytics logic are designed to handle larger datasets and could easily support real-time analytics for hundreds of users with minimal changes.
+
 ## Features
 
 - Real-time data from GCP Firestore
