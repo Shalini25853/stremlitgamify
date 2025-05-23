@@ -1,6 +1,17 @@
 import streamlit as st
 import firebase_admin
 from firebase_admin import credentials, firestore
+def normalize_entry(entry):
+    """Standardize field names and fill in missing values."""
+    return {
+        "user_name": entry.get("user_name", "Unknown"),
+        "user_id": entry.get("user_id", "unknown"),
+        "action": entry.get("action", "unknown"),
+        "points_awarded": entry.get("points_awarded", 0),
+        "device": entry.get("device") or entry.get("devices", "unknown"),
+        "location": entry.get("location") or entry.get("locations", "unknown"),
+        "timestamp": entry.get("timestamp", "")
+    }
 
 def connect_to_firestore():
     if not firebase_admin._apps:
