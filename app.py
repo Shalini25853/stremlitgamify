@@ -53,7 +53,7 @@ else:
 
 # KPI Metrics Grid
 st.markdown("### 📊 Key Engagement Metrics")
-cols = st.columns(len(filtered_users))
+cols = st.columns(min(4, len(filtered_users)))
 for i, (user, stats) in enumerate(filtered_users.items()):
     with cols[i % len(cols)]:
         st.metric(
