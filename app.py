@@ -1,89 +1,106 @@
 import streamlit as st
-import matplotlib.pyplot as plt
 import pandas as pd
-from collections import defaultdict
-from firestore_utils import connect_to_firestore
+import matplotlib.pyplot as plt
+from firestore_utils import connect_to_firestore, fetch_activity_logs, calculate_user_stats, build_leaderboard
 
-# Set up page
-st.set_page_config(page_title="Gamification Dashboard", layout="wide")
-st.title("🎮 Gamification Dashboard")
+# Page configuration
+st.set_page_config(page_title="GamifyConnect Dashboard", layout="wide")
+
+# Custom style
 st.markdown("""
-Analyze gamified engagement patterns using actions like shares, posts, likes, and login streaks. Use filters below to explore user behavior, device types, and engagement stats.
+    <style>
+        .main {
+            background-color: #0E1117;
+            color: #FFFFFF;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        h1, h2, h3 {
+            color: #F39C12;
+        }
+        .stSelectbox > div > div {
+            background-color: #1E1E1E;
+            color: white;
+        }
+        .metric-box {
+            padding: 1rem;
+            background: #1E1E1E;
+            border-radius: 10px;
+            margin-bottom: 1rem;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+# Header
+st.title("🎮 GamifyConnect Dashboard")
+st.markdown("""
+Analyze gamified engagement patterns from social media-like activity such as posts, shares, likes, and login streaks. 
+Use the filters to dive deep into user behavior by device or location.
 """)
 
-# Firestore connection and log fetching
+# Connect to Firestore
 db = connect_to_firestore()
-logs = db.collection("activity_logs").stream()
+logs = fetch_activity_logs(db)
+user_stats = calculate_user_stats(logs)
+leaderboard = build_leaderboard(user_stats)
 
-data = []
-for doc in logs:
-    record = doc.to_dict()
-    record["timestamp"] = pd.to_datetime(record.get("timestamp"), errors="coerce")
-    if record["timestamp"] is not pd.NaT:
-        data.append(record)
+# Sidebar Filters
+st.sidebar.header("🔍 Filter Users")
+unique_devices = sorted(set([v.get("device", "unknown") for v in user_stats.values()]))
+unique_locations = sorted(set([v.get("location", "unknown") for v in user_stats.values()]))
 
-df = pd.DataFrame(data)
+device_filter = st.sidebar.selectbox("Device", ["All"] + unique_devices)
+location_filter = st.sidebar.selectbox("Location", ["All"] + unique_locations)
 
-# Normalize and summarize user stats
-user_stats = defaultdict(lambda: {
-    "total_points": 0,
-    "actions": defaultdict(int),
-    "device": "unknown",
-    "location": "unknown"
-})
-
-for row in data:
-    user = row.get("user_name", "Unknown")
-    user_stats[user]["total_points"] += row.get("points_awarded", 0)
-    user_stats[user]["actions"][row.get("action", "")] += 1
-    user_stats[user]["device"] = row.get("device", "unknown")
-    user_stats[user]["location"] = row.get("location", "unknown")
-
-# Leaderboard Section
-st.subheader("🏆 Leaderboard")
-leaderboard = sorted(user_stats.items(), key=lambda x: x[1]["total_points"], reverse=True)
-if leaderboard:
-    for user, stats in leaderboard:
-        st.write(f"**{user}**: {stats['total_points']} pts")
-else:
-    st.info("No leaderboard data available.")
-
-# Filter Sidebar
-st.sidebar.title("🔍 Filter")
-devices = sorted(set(stats["device"] for stats in user_stats.values()))
-locations = sorted(set(stats["location"] for stats in user_stats.values()))
-
-selected_device = st.sidebar.selectbox("Device", ["All"] + devices)
-selected_location = st.sidebar.selectbox("Location", ["All"] + locations)
-
-# Engagement Metrics Section
-st.subheader("📊 Key Engagement Metrics")
+# Apply filters
 filtered_users = {
     user: stats for user, stats in user_stats.items()
-    if (selected_device == "All" or stats["device"] == selected_device)
-    and (selected_location == "All" or stats["location"] == selected_location)
+    if (device_filter == "All" or stats.get("device") == device_filter)
+    and (location_filter == "All" or stats.get("location") == location_filter)
 }
 
+# Leaderboard
+st.markdown("## 🏆 Leaderboard")
 if filtered_users:
-    for user, stats in filtered_users.items():
-        st.markdown(f"**{user}** - {stats['total_points']} pts")
-        st.json(dict(stats.get("actions", {})))
+    sorted_leaderboard = build_leaderboard(filtered_users)
+    col1, col2, col3 = st.columns(3)
+    for i, (user, stats) in enumerate(sorted_leaderboard):
+        with [col1, col2, col3][i % 3]:
+            st.metric(label=f"{user}", value=f"{stats['total_points']} pts")
 else:
-    st.info("No users match the selected filters.")
+    st.warning("No leaderboard data matches the filters.")
 
-# Engagement Trend Chart
-st.subheader("📈 Engagement Trends")
-if not df.empty:
-    df = df.dropna(subset=["timestamp"])
+# Engagement Metrics Grid
+st.markdown("## 📊 Key Engagement Metrics")
+if filtered_users:
+    grid_cols = st.columns(3)
+    for i, (user, stats) in enumerate(filtered_users.items()):
+        with grid_cols[i % 3]:
+            st.markdown(f"### 👤 {user}")
+            st.markdown(f"<div class='metric-box'><strong>Total Points:</strong> {stats['total_points']}<br><strong>Badges:</strong> {' | '.join(stats.get('badges', [])) or 'None'}</div>", unsafe_allow_html=True)
+            st.markdown("**Actions:**")
+            st.json(stats.get("actions", {}))
+            st.markdown("**Device Usage:**")
+            st.json(stats.get("device_counts", {}))
+            st.markdown("**Location Usage:**")
+            st.json(stats.get("location_counts", {}))
+else:
+    st.info("No engagement data matches the filters.")
+
+# Engagement Trends
+st.markdown("## 📈 Engagement Trends Over Time")
+if logs:
+    df = pd.DataFrame(logs)
+    df["timestamp"] = pd.to_datetime(df["timestamp"], errors='coerce')
+    df.dropna(subset=["timestamp"], inplace=True)
     df["date"] = df["timestamp"].dt.date
     df_summary = df.groupby(["date", "action"]).size().unstack(fill_value=0)
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(10, 5))
     df_summary.plot(ax=ax, kind="line", marker="o")
-    ax.set_title("Engagement Over Time")
-    ax.set_ylabel("Count")
+    ax.set_title("Engagement Over Time", fontsize=14)
     ax.set_xlabel("Date")
-    ax.grid(True)
+    ax.set_ylabel("Interaction Count")
+    ax.grid(True, linestyle="--", alpha=0.6)
     st.pyplot(fig)
 else:
-    st.info("No log data available for trend chart.")
+    st.info("No timestamp data available to plot trends.")
