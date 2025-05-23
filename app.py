@@ -4,55 +4,43 @@ import matplotlib.pyplot as plt
 from firestore_utils import connect_to_firestore
 from gamification_engine import fetch_activity_logs, calculate_user_stats, build_leaderboard
 
-# Page setup
+# ---- CONFIG ----
 st.set_page_config(page_title="GamifyConnect", layout="wide")
-st.title("🎮 GamifyConnect – Social Media Gamification Dashboard")
 
-# Connect to Firestore
+st.title("🎮 GamifyConnect – Social Media Gamification Dashboard")
+st.markdown("Analyze gamified engagement patterns using actions like shares, posts, likes, and streaks.")
+
+# ---- FIRESTORE CONNECTION ----
 db = connect_to_firestore()
 logs = fetch_activity_logs(db)
 user_stats = calculate_user_stats(logs)
 leaderboard = build_leaderboard(user_stats)
 
-# Sidebar filters
-st.sidebar.header("📊 Filters")
-device_filter = st.sidebar.selectbox("Device", ["All", "desktop", "mobile", "unknown"])
-all_locations = sorted({v.get("location", "Unknown") for v in user_stats.values() if "location" in v})
-location_filter = st.sidebar.selectbox("Location", ["All"] + all_locations)
-
-# Filtered leaderboard
-filtered_leaderboard = [
-    user for user in leaderboard
-    if (device_filter == "All" or device_filter in user_stats[user["name"]]["devices"]) and
-       (location_filter == "All" or user_stats[user["name"]].get("location", "Unknown") == location_filter)
-]
-
-# 🎯 Leaderboard Section
+# ---- LEADERBOARD SECTION ----
 st.markdown("## 🏆 Leaderboard")
-if filtered_leaderboard:
-    names = [v["name"] for v in filtered_leaderboard]
-    points = [v["total_points"] for v in filtered_leaderboard]
 
-    fig, ax = plt.subplots(figsize=(8, 4))
-    bars = ax.bar(names, points, color="skyblue", edgecolor="gold", linewidth=2)
-    ax.set_ylabel("Total Points")
-    ax.set_title("Top Performers")
-    st.pyplot(fig)
-else:
-    st.info("No users match the selected filters.")
+names = [v["name"] for _, v in leaderboard]
+points = [v["total_points"] for _, v in leaderboard]
 
-# 🧠 User Details Section
-st.markdown("## 📝 User Details")
-selected_user = st.selectbox("Select a user", list(user_stats.keys()))
+fig, ax = plt.subplots()
+ax.bar(names, points, color="skyblue", edgecolor="gold", linewidth=3)
+ax.set_ylabel("Total Points")
+ax.set_title("Total Engagement by User")
+st.pyplot(fig)
 
-if selected_user:
-    stats = user_stats[selected_user]
-    st.subheader(f"{selected_user}")
-    st.markdown(f"**Total Points:** {stats['total_points']}")
-    st.markdown(f"**Badges:** {' '.join(['🏅 ' + b for b in stats['badges']]) if stats['badges'] else 'None'}")
+# ---- USER FILTERS ----
+st.markdown("## 🔎 Filter Users")
+device_filter = st.selectbox("Device", ["All"] + sorted({v.get("device", "unknown") for v in user_stats.values()}))
+location_filter = st.selectbox("Location", ["All"] + sorted({v.get("location", "unknown") for v in user_stats.values()}))
 
-    st.markdown("**Actions:**")
-    st.json(stats["actions"])
-
-    st.markdown("**Devices Used:**")
-    st.json(stats["devices"])
+# ---- USER INSIGHTS ----
+st.markdown("## 📋 User Details")
+for user_id, stats in user_stats.items():
+    if (device_filter == "All" or stats.get("device") == device_filter) and \
+       (location_filter == "All" or stats.get("location") == location_filter):
+        with st.expander(f"{stats['name']}"):
+            st.markdown(f"**Total Points:** {stats['total_points']}")
+            st.markdown(f"**Badges:** {' • '.join(stats['badges'])}")
+            st.json(stats["actions"])
+            st.markdown("**Devices Used:**")
+            st.json(stats["devices"])
