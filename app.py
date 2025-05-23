@@ -1,24 +1,15 @@
 import streamlit as st
-import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
 from firestore_utils import connect_to_firestore, fetch_activity_logs, calculate_user_stats, build_leaderboard
 
-# Set dashboard page config
-st.set_page_config(
-    page_title="GamifyConnect Dashboard",
-    layout="wide",
-    page_icon="🎮"
-)
-
-# Title and description
+st.set_page_config(page_title="GamifyConnect Dashboard", layout="wide")
 st.title("🎮 GamifyConnect – Social Media Gamification Dashboard")
-st.markdown(
-    "Analyze gamified engagement patterns using actions like shares, posts, likes, and login streaks. "
-    "Use filters below to explore user behavior, device types, and engagement stats."
-)
+st.markdown("""
+Analyze gamified engagement patterns using actions like shares, posts, likes, and login streaks. 
+Use filters below to explore user behavior, device types, and engagement stats.
+""")
 
-# Load and process data
+# Connect to Firestore
 db = connect_to_firestore()
 logs = fetch_activity_logs(db)
 user_stats = calculate_user_stats(logs)
@@ -26,13 +17,31 @@ leaderboard = build_leaderboard(user_stats)
 
 # Sidebar Filters
 st.sidebar.header("🔍 Filter")
-devices = sorted(set(v.get("device", "Unknown") for v in user_stats.values()))
-locations = sorted(set(v.get("location", "Unknown") for v in user_stats.values()))
+device_filter = st.sidebar.selectbox("Device", ["All"] + sorted(set(v.get("device", "") for v in user_stats.values())))
+location_filter = st.sidebar.selectbox("Location", ["All"] + sorted(set(v.get("location", "") for v in user_stats.values())))
 
-selected_device = st.sidebar.selectbox("Device", ["All"] + devices)
-selected_location = st.sidebar.selectbox("Location", ["All"] + locations)
+# Apply Filters
+filtered_users = [
+    user for user, stats in user_stats.items()
+    if (device_filter == "All" or stats.get("device") == device_filter)
+    and (location_filter == "All" or stats.get("location") == location_filter)
+]
 
-# Filtered users
+# Leaderboard
+st.subheader("🏆 Leaderboard")
+if leaderboard:
+    names = [v["name"] for v in leaderboard]
+    points = [v["total_points"] for v in leaderboard]
+    fig, ax = plt.subplots()
+    ax.bar(names, points, color="skyblue", edgecolor="gold", linewidth=2)
+    ax.set_ylabel("Total Points")
+    ax.set_title("Top Gamified Users")
+    st.pyplot(fig)
+else:
+    st.warning("No leaderboard data available.")
+
+# Key Metrics Section
+st.subheader("📊 Key Engagement Metrics")
 if filtered_users:
     cols = st.columns(min(4, len(filtered_users)))
     for col, user in zip(cols, filtered_users):
@@ -41,38 +50,3 @@ if filtered_users:
             st.metric(label=f"{user}", value=f'{stats["total_points"]} pts')
 else:
     st.info("No users match the selected filters.")
-
-
-# Leaderboard Section
-st.markdown("### 🏆 Leaderboard")
-if leaderboard:
-    df_leaderboard = pd.DataFrame(leaderboard)
-    fig, ax = plt.subplots(figsize=(8, 4))
-    sns.barplot(data=df_leaderboard, x="total_points", y="name", palette="coolwarm", edgecolor="black", ax=ax)
-    ax.set_xlabel("Total Points")
-    ax.set_ylabel("User")
-    st.pyplot(fig)
-else:
-    st.warning("No leaderboard data available.")
-
-# KPI Metrics Grid
-st.markdown("### 📊 Key Engagement Metrics")
-cols = st.columns(min(4, len(filtered_users)))
-for i, (user, stats) in enumerate(filtered_users.items()):
-    with cols[i % len(cols)]:
-        st.metric(
-            label=f"{user} (pts)",
-            value=stats.get("total_points", 0),
-            delta=f"{len(stats.get('badges', []))} badges"
-        )
-
-# Detailed User Summary
-st.markdown("### 👤 User Activity Breakdown")
-for user, stats in filtered_users.items():
-    with st.expander(f"📋 {user}"):
-        st.write(f"**Total Points:** {stats.get('total_points', 0)}")
-        st.write(f"**Badges:** {', '.join(stats.get('badges', [])) or 'None'}")
-        st.write("**Actions:**")
-        st.json(stats.get("actions", {}))
-        st.write("**Devices Used:**")
-        st.json(stats.get("devices", {}))
