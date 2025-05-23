@@ -1,52 +1,100 @@
 import streamlit as st
-import matplotlib.pyplot as plt
-from firestore_utils import connect_to_firestore, fetch_activity_logs, calculate_user_stats, build_leaderboard
+import firebase_admin
+from firebase_admin import credentials, firestore
 
-st.set_page_config(page_title="GamifyConnect Dashboard", layout="wide")
+# --- Firebase Connection ---
+def connect_to_firestore():
+    if not firebase_admin._apps:
+        firebase_secret = dict(st.secrets["firebase"])
+        cred = credentials.Certificate(firebase_secret)
+        firebase_admin.initialize_app(cred)
+    return firestore.client()
+
+# --- Normalize Each Entry ---
+def normalize_entry(entry):
+    return {
+        "user_name": entry.get("user_name", "Unknown"),
+        "user_id": entry.get("user_id", "unknown"),
+        "action": entry.get("action", "unknown"),
+        "points_awarded": entry.get("points_awarded", 0),
+        "device": entry.get("device") or entry.get("devices", "unknown"),
+        "location": entry.get("location") or entry.get("locations", "unknown"),
+        "timestamp": entry.get("timestamp", "")
+    }
+
+# --- Fetch and Normalize Activity Logs ---
+def fetch_activity_logs(db):
+    docs = db.collection("activity_logs").stream()
+    return [normalize_entry(doc.to_dict()) for doc in docs]
+
+# --- Compute Stats Per User ---
+def calculate_user_stats(logs):
+    user_logs = {}
+    for entry in logs:
+        user = entry["user_name"]
+        if user not in user_logs:
+            user_logs[user] = {
+                "device": entry.get("device", "unknown"),
+                "location": entry.get("location", "unknown"),
+                "actions": {},
+                "total_points": 0
+            }
+
+        action = entry.get("action")
+        user_logs[user]["actions"][action] = user_logs[user]["actions"].get(action, 0) + 1
+        user_logs[user]["total_points"] += entry.get("points_awarded", 0)
+
+    return user_logs
+
+# --- Build Leaderboard ---
+def build_leaderboard(stats):
+    return sorted(
+        [{"name": k, **v} for k, v in stats.items()],
+        key=lambda x: x["total_points"],
+        reverse=True
+    )
+
+# --- Streamlit UI ---
+db = connect_to_firestore()
+logs = fetch_activity_logs(db)
+user_stats = calculate_user_stats(logs)
+
+# Sidebar Filters
+devices = sorted(set(entry.get("device", "unknown") for entry in logs))
+locations = sorted(set(entry.get("location", "unknown") for entry in logs))
+
+st.sidebar.header("🔍 Filter")
+device_filter = st.sidebar.selectbox("Device", ["All"] + devices)
+location_filter = st.sidebar.selectbox("Location", ["All"] + locations)
+
+# Apply filters
+filtered_users = {
+    user: stats for user, stats in user_stats.items()
+    if (device_filter == "All" or stats["device"] == device_filter)
+    and (location_filter == "All" or stats["location"] == location_filter)
+}
+
+# --- Main Dashboard ---
 st.title("🎮 GamifyConnect – Social Media Gamification Dashboard")
 st.markdown("""
 Analyze gamified engagement patterns using actions like shares, posts, likes, and login streaks. 
 Use filters below to explore user behavior, device types, and engagement stats.
 """)
 
-# Connect to Firestore
-db = connect_to_firestore()
-logs = fetch_activity_logs(db)
-user_stats = calculate_user_stats(logs)
-leaderboard = build_leaderboard(user_stats)
-
-# Sidebar Filters
-st.sidebar.header("🔍 Filter")
-device_filter = st.sidebar.selectbox("Device", ["All"] + sorted(set(v.get("device", "") for v in user_stats.values())))
-location_filter = st.sidebar.selectbox("Location", ["All"] + sorted(set(v.get("location", "") for v in user_stats.values())))
-
-# Apply Filters
-filtered_users = [
-    user for user, stats in user_stats.items()
-    if (device_filter == "All" or stats.get("device") == device_filter)
-    and (location_filter == "All" or stats.get("location") == location_filter)
-]
-
 # Leaderboard
 st.subheader("🏆 Leaderboard")
+leaderboard = build_leaderboard(filtered_users)
 if leaderboard:
-    names = [v["name"] for v in leaderboard]
-    points = [v["total_points"] for v in leaderboard]
-    fig, ax = plt.subplots()
-    ax.bar(names, points, color="skyblue", edgecolor="gold", linewidth=2)
-    ax.set_ylabel("Total Points")
-    ax.set_title("Top Gamified Users")
-    st.pyplot(fig)
+    for user in leaderboard:
+        st.write(f"**{user['name']}**: {user['total_points']} pts")
 else:
-    st.warning("No leaderboard data available.")
+    st.info("No leaderboard data available.")
 
-# Key Metrics Section
+# Key Engagement Metrics
 st.subheader("📊 Key Engagement Metrics")
 if filtered_users:
-    cols = st.columns(min(4, len(filtered_users)))
-    for col, user in zip(cols, filtered_users):
-        stats = user_stats[user]
-        with col:
-            st.metric(label=f"{user}", value=f'{stats["total_points"]} pts')
+    for user, stats in filtered_users.items():
+        st.markdown(f"**{user}** - {stats['total_points']} pts")
+        st.json(stats["actions"])
 else:
-    st.info("No users match the selected filters.")
+    st.warning("No users match the selected filters.")
