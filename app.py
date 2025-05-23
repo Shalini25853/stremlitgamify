@@ -34,13 +34,16 @@ device_filter = st.selectbox("Device", ["All"] + sorted({v.get("device", "unknow
 location_filter = st.selectbox("Location", ["All"] + sorted({v.get("location", "unknown") for v in user_stats.values()}))
 
 # ---- USER INSIGHTS ----
+# ---- USER INSIGHTS ----
 st.markdown("## 📋 User Details")
 for user_id, stats in user_stats.items():
     if (device_filter == "All" or stats.get("device") == device_filter) and \
        (location_filter == "All" or stats.get("location") == location_filter):
         with st.expander(f"{stats['name']}"):
-            st.markdown(f"**Total Points:** {stats['total_points']}")
-            st.markdown(f"**Badges:** {' • '.join(stats['badges'])}")
-            st.json(stats["actions"])
+            st.markdown(f"**Total Points:** {stats.get('total_points', 0)}")
+            st.markdown(f"**Badges:** {' • '.join(stats.get('badges', []))}")
+            st.markdown("**Actions:**")
+            st.json(stats.get("actions", {}))
             st.markdown("**Devices Used:**")
-            st.json(stats["devices"])
+            st.json(stats.get("devices", {}))
+
