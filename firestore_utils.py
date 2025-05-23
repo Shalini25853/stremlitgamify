@@ -10,14 +10,39 @@ def connect_to_firestore():
     return firestore.client()
 
 def fetch_activity_logs(db):
-    logs_ref = db.collection("user_logs")
+    logs_ref = db.collection("activity_logs")
     docs = logs_ref.stream()
-    logs = []
+
+    user_logs = {}
+
     for doc in docs:
-        log = doc.to_dict()
-        log["id"] = doc.id
-        logs.append(log)
-    return logs
+        data = doc.to_dict()
+        user = data.get("user_name", "Unknown")
+        action = data.get("action")
+        points = data.get("points_awarded", 0)
+        device = data.get("device", "unknown")
+        location = data.get("location", "unknown")
+
+        if user not in user_logs:
+            user_logs[user] = {
+                "user": user,
+                "device": device,
+                "location": location,
+                "actions": {},
+                "total_points": 0
+            }
+
+        # Increment action count
+        if action in user_logs[user]["actions"]:
+            user_logs[user]["actions"][action] += 1
+        else:
+            user_logs[user]["actions"][action] = 1
+
+        # Add points
+        user_logs[user]["total_points"] += points
+
+    return list(user_logs.values())
+
 
 def calculate_user_stats(logs):
     stats = {}
