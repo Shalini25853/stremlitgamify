@@ -33,11 +33,15 @@ selected_device = st.sidebar.selectbox("Device", ["All"] + devices)
 selected_location = st.sidebar.selectbox("Location", ["All"] + locations)
 
 # Filtered users
-filtered_users = {
-    k: v for k, v in user_stats.items()
-    if (selected_device == "All" or v.get("device") == selected_device) and
-       (selected_location == "All" or v.get("location") == selected_location)
-}
+if filtered_users:
+    cols = st.columns(min(4, len(filtered_users)))
+    for col, user in zip(cols, filtered_users):
+        stats = user_stats[user]
+        with col:
+            st.metric(label=f"{user}", value=f'{stats["total_points"]} pts')
+else:
+    st.info("No users match the selected filters.")
+
 
 # Leaderboard Section
 st.markdown("### 🏆 Leaderboard")
