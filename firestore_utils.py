@@ -45,30 +45,24 @@ def fetch_activity_logs(db):
 
 
 def calculate_user_stats(logs):
-    stats = {}
+    result = {}
+
     for entry in logs:
-        name = entry.get("name")
-        if name not in stats:
-            stats[name] = {
-                "total_points": 0,
-                "badges": [],
-                "actions": {},
-                "devices": {},
-                "location": entry.get("location", "unknown")
-            }
-        stats[name]["total_points"] += entry.get("points", 0)
+        user = entry["user"]
+        device = entry.get("device", "unknown")
+        location = entry.get("location", "unknown")
+        actions = entry.get("actions", {})
+        points = entry.get("total_points", 0)
 
-        for badge in entry.get("badges", []):
-            if badge not in stats[name]["badges"]:
-                stats[name]["badges"].append(badge)
+        result[user] = {
+            "device": device,
+            "location": location,
+            "actions": actions,
+            "total_points": points
+        }
 
-        for action, count in entry.get("actions", {}).items():
-            stats[name]["actions"][action] = stats[name]["actions"].get(action, 0) + count
+    return result
 
-        for device, count in entry.get("device", {}).items():
-            stats[name]["devices"][device] = stats[name]["devices"].get(device, 0) + count
-
-    return stats
 
 def build_leaderboard(stats):
     leaderboard = sorted(
