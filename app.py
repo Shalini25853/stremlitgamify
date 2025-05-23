@@ -1,59 +1,80 @@
 import streamlit as st
 import matplotlib.pyplot as plt
 import pandas as pd
-from firestore_utils import connect_to_firestore, fetch_activity_logs, calculate_user_stats, build_leaderboard
+from collections import defaultdict
+from firestore_utils import connect_to_firestore
 
+# Set up page
 st.set_page_config(page_title="Gamification Dashboard", layout="wide")
 st.title("🎮 Gamification Dashboard")
 st.markdown("""
 Analyze gamified engagement patterns using actions like shares, posts, likes, and login streaks. Use filters below to explore user behavior, device types, and engagement stats.
 """)
 
-# Connect to Firestore
+# Firestore connection and log fetching
 db = connect_to_firestore()
-logs = fetch_activity_logs(db)
-user_stats = calculate_user_stats(logs)
-leaderboard = build_leaderboard(user_stats)
+logs = db.collection("activity_logs").stream()
 
-# Sidebar Filters
-st.sidebar.title("🔍 Filter")
-unique_devices = sorted(set([v.get("device", "unknown") for v in user_stats.values()]))
-unique_locations = sorted(set([v.get("location", "unknown") for v in user_stats.values()]))
+data = []
+for doc in logs:
+    record = doc.to_dict()
+    record["timestamp"] = pd.to_datetime(record.get("timestamp"), errors="coerce")
+    if record["timestamp"] is not pd.NaT:
+        data.append(record)
 
-device_filter = st.sidebar.selectbox("Device", ["All"] + unique_devices)
-location_filter = st.sidebar.selectbox("Location", ["All"] + unique_locations)
+df = pd.DataFrame(data)
 
-# Filtered Users
-filtered_users = {
-    user: stats for user, stats in user_stats.items()
-    if (device_filter == "All" or stats.get("device") == device_filter)
-    and (location_filter == "All" or stats.get("location") == location_filter)
-}
+# Normalize and summarize user stats
+user_stats = defaultdict(lambda: {
+    "total_points": 0,
+    "actions": defaultdict(int),
+    "device": "unknown",
+    "location": "unknown"
+})
+
+for row in data:
+    user = row.get("user_name", "Unknown")
+    user_stats[user]["total_points"] += row.get("points_awarded", 0)
+    user_stats[user]["actions"][row.get("action", "")] += 1
+    user_stats[user]["device"] = row.get("device", "unknown")
+    user_stats[user]["location"] = row.get("location", "unknown")
 
 # Leaderboard Section
 st.subheader("🏆 Leaderboard")
-if filtered_users:
-    sorted_leaderboard = build_leaderboard(filtered_users)
-    for entry in sorted_leaderboard:
-        st.write(f"**{entry['name']}**: {entry['total_points']} pts")
+leaderboard = sorted(user_stats.items(), key=lambda x: x[1]["total_points"], reverse=True)
+if leaderboard:
+    for user, stats in leaderboard:
+        st.write(f"**{user}**: {stats['total_points']} pts")
 else:
     st.info("No leaderboard data available.")
 
+# Filter Sidebar
+st.sidebar.title("🔍 Filter")
+devices = sorted(set(stats["device"] for stats in user_stats.values()))
+locations = sorted(set(stats["location"] for stats in user_stats.values()))
+
+selected_device = st.sidebar.selectbox("Device", ["All"] + devices)
+selected_location = st.sidebar.selectbox("Location", ["All"] + locations)
+
 # Engagement Metrics Section
 st.subheader("📊 Key Engagement Metrics")
+filtered_users = {
+    user: stats for user, stats in user_stats.items()
+    if (selected_device == "All" or stats["device"] == selected_device)
+    and (selected_location == "All" or stats["location"] == selected_location)
+}
+
 if filtered_users:
     for user, stats in filtered_users.items():
         st.markdown(f"**{user}** - {stats['total_points']} pts")
-        st.json(stats.get("actions", {}))
+        st.json(dict(stats.get("actions", {})))
 else:
     st.info("No users match the selected filters.")
 
-# 📈 Engagement Trend Chart
+# Engagement Trend Chart
 st.subheader("📈 Engagement Trends")
-if logs:
-    df = pd.DataFrame(logs)
-    df["timestamp"] = pd.to_datetime(df["timestamp"], errors='coerce')
-    df.dropna(subset=["timestamp"], inplace=True)
+if not df.empty:
+    df = df.dropna(subset=["timestamp"])
     df["date"] = df["timestamp"].dt.date
     df_summary = df.groupby(["date", "action"]).size().unstack(fill_value=0)
 
