@@ -1,8 +1,17 @@
 import streamlit as st
 import firebase_admin
 from firebase_admin import credentials, firestore
+
+# Initialize Firestore
+def connect_to_firestore():
+    if not firebase_admin._apps:
+        firebase_secret = dict(st.secrets["firebase"])
+        cred = credentials.Certificate(firebase_secret)
+        firebase_admin.initialize_app(cred)
+    return firestore.client()
+
+# Normalize each log entry from Firestore
 def normalize_entry(entry):
-    """Standardize field names and fill in missing values."""
     return {
         "user_name": entry.get("user_name", "Unknown"),
         "user_id": entry.get("user_id", "unknown"),
@@ -13,71 +22,44 @@ def normalize_entry(entry):
         "timestamp": entry.get("timestamp", "")
     }
 
-def connect_to_firestore():
-    if not firebase_admin._apps:
-        firebase_secret = dict(st.secrets["firebase"])
-        cred = credentials.Certificate(firebase_secret)
-        firebase_admin.initialize_app(cred)
-    return firestore.client()
-
+# Fetch and normalize all logs
 def fetch_activity_logs(db):
-    logs_ref = db.collection("activity_logs")
-    docs = logs_ref.stream()
+    docs = db.collection("activity_logs").stream()
+    logs = [normalize_entry(doc.to_dict()) for doc in docs]
+    return logs
 
-    user_logs = {}
+# Aggregate logs into per-user stats
+def calculate_user_stats(logs):
+    result = {}
+    for entry in logs:
+        user = entry["user_name"]
+        device = entry.get("device", "unknown")
+        location = entry.get("location", "unknown")
+        action = entry.get("action", "unknown")
+        points = entry.get("points_awarded", 0)
 
-    for doc in docs:
-        data = doc.to_dict()
-        user = data.get("user_name", "Unknown")
-        action = data.get("action")
-        points = data.get("points_awarded", 0)
-        device = data.get("device", "unknown")
-        location = data.get("location", "unknown")
-
-        if user not in user_logs:
-            user_logs[user] = {
-                "user": user,
+        if user not in result:
+            result[user] = {
                 "device": device,
                 "location": location,
                 "actions": {},
                 "total_points": 0
             }
 
-        # Increment action count
-        if action in user_logs[user]["actions"]:
-            user_logs[user]["actions"][action] += 1
+        # Count actions
+        if action in result[user]["actions"]:
+            result[user]["actions"][action] += 1
         else:
-            user_logs[user]["actions"][action] = 1
+            result[user]["actions"][action] = 1
 
-        # Add points
-        user_logs[user]["total_points"] += points
-
-    return list(user_logs.values())
-
-
-def calculate_user_stats(logs):
-    result = {}
-
-    for entry in logs:
-        user = entry["user"]
-        device = entry.get("device", "unknown")
-        location = entry.get("location", "unknown")
-        actions = entry.get("actions", {})
-        points = entry.get("total_points", 0)
-
-        result[user] = {
-            "device": device,
-            "location": location,
-            "actions": actions,
-            "total_points": points
-        }
+        result[user]["total_points"] += points
 
     return result
 
-
+# Build leaderboard from stats
 def build_leaderboard(stats):
     leaderboard = sorted(
-        [{"name": k, **v} for k, v in stats.items()],
+        [{"name": name, **data} for name, data in stats.items()],
         key=lambda x: x["total_points"],
         reverse=True
     )
